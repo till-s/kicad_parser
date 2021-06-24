@@ -12,9 +12,13 @@ mergef = None
 basf   = None
 mergen = []
 anchor = []
+test   = False
 logLvl = 'ERROR'
-opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:")
+shtPre = None
+opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:ts:")
 for o, a in opts:
+  if o == '-t':
+    test = True
   if o == '-h':
     print("merge two PCBs", file=sys.stderr)
   elif o == '-o':
@@ -44,11 +48,13 @@ for o, a in opts:
     anchor = a.split(':')
     if not len(anchor) in [1,2]:
       raise RuntimeError("path substitution must be '[from:]to'")
+  elif o == '-s':
+    shtPre = a
 
 if basf is None:
   raise RuntimeError("Exactly one -b option (base PCB) required")
 
-if mergef is None:
+if mergef is None and not test:
   raise RuntimeError("Exactly one -m option (mergee PCB) required")
 
 logging.basicConfig(level=logLvl,
@@ -152,9 +158,12 @@ class PCBPart(object):
     if haveErrs:
       raise RuntimeError("Parsing Errors Encoutered")
     self._pcb   = pcb
-    self._nl    = pcb['net']
-    self._nm    = dict()
     self._vdbg  = False
+    self.buildNetlist()
+
+  def buildNetlist(self):
+    self._nl    = self._pcb['net']
+    self._nm    = dict()
     # check if it is consecutive
     i         = 0
     for e in self._nl:
@@ -167,6 +176,7 @@ class PCBPart(object):
         pass
       self._nm[e[1]] = e
       i = i + 1
+
 
   def getNetNames(self):
     return self._nm
@@ -303,9 +313,9 @@ class PCBPart(object):
     while True:
       try:
         k = next(it)
-        print("comparing {} -- {}".format(nc1[k], nc2[k]), file=sys.stderr)
         if ( 'add_net' != k and nc1[k] != nc2[k] ):
-          print("netclass ('{}') mismatch: values for '{}' differ".format(nc1[0], k), file=sys.stderr)
+          print("netclass ('{}') mismatch: values for '{}' differ:".format(nc1[0], k), file=sys.stderr)
+          print("to be merged: {} -- base PCB: {}".format(nc1[k], nc2[k]), file=sys.stderr)
           r = 0
       except KeyError:
           print("netclass ('{}') key mismatch: '{}' not found".format(nc1[0], k), file=sys.stderr)
@@ -347,14 +357,64 @@ class PCBPart(object):
     if e:
       raise RuntimeError("Incompatible Netclasses")
 
-  def add(self, mergee, anchor, mergeNets=[]):
-    # check that there are no overlapping net-names
-    err = False
+  def findDuplicateNets(self, mergee, mergeNets):
+    dup = []
     for netNam in mergee.getNetNames():
       if netNam in self.getNetNames() and not netNam in mergeNets:
-        print("Net '{}' already preset".format( netNam ), file=sys.stderr)
-        err = True
-    if err:
+        dup.append(netNam)
+    return dup
+
+  @staticmethod
+  def prefixedName(pre, nam):
+    if nam[0] != '/':
+      raise RuntimeError("name to be prefixed does not start with a '/'")
+    if pre is None or len(pre) == 0 or pre == '/':
+      raise RuntimeError("found a local label ({}) but no prefix -- you must give a prefix with '-s' ".format(nam))
+    return pre + nam
+
+  def renameLocalLabelNets(self, pre):
+    # rename nets
+    for n in self.getPcb()['net']:
+      if n[1][0] == '/':
+        try:
+          n._value[1] = self.prefixedName(pre, n[1])
+        except AttributeError:
+          print(type(n))
+          raise
+    # rebuild the netlist
+    self.buildNetlist()
+    # rename nets in zones
+    for z in self.getPcb()['zone']:
+      if z['net_name'][0] == '/':
+        z._value.add(Sexp('net_name', self.prefixedName(pre, z['net_name'])), action = 0)
+    # rename nets in pads
+    for m in self.getPcb()['module']:
+      for p in m['pad']:
+        try:
+          n = p['net']
+        except KeyError:
+          # pad is not connected
+          continue
+        if n[1][0] == '/':
+          n[1] = self.prefixedName(pre, n[1])
+    # rename nets in netclass
+    for ncl in self.getPcb()['net_class']:
+      for n in ncl['add_net']:
+        if n._value[0] == '/':
+          n._value = self.prefixedName(pre, n._value)
+
+  def add(self, mergee, anchor, mergeNets=[], localLblPrefix=None):
+
+    if not localLblPrefix is None and localLblPrefix[0] != '/':
+      localLblPrefix = '/' + localLblPrefix
+
+    mergee.renameLocalLabelNets( localLblPrefix )
+
+    # check that there are no overlapping net-names
+    dup = self.findDuplicateNets(mergee, mergeNets)
+    if len(dup) > 0:
+      for netNam in dup:
+        print("Net '{}' already present".format( netNam ), file=sys.stderr)
       raise RuntimeError("Duplicate net-names found; aborting")
     offset = len(self.getPcb()['net'])
     netMap = dict()
@@ -408,13 +468,14 @@ class PCBPart(object):
 
 b = PCBPart(basf)
 RefVerify(b)
-m = PCBPart(mergef)
-RefVerify(m)
-b.add(m,anchor,mergen)
+if not mergef is None:
+  m = PCBPart(mergef)
+  RefVerify(m)
+  b.add(m,anchor,mergen,shtPre)
 
-if not outf is None:
-  if '-' == outf:
-    f = sys.stdout
-  else:
-    f = io.open(outf,'w')
-  b.export(f,'  ')
+  if not outf is None:
+    if '-' == outf:
+      f = sys.stdout
+    else:
+      f = io.open(outf,'w')
+    b.export(f,'  ')
