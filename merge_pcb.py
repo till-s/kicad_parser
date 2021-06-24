@@ -17,6 +17,7 @@ logging.basicConfig(level=args.logLevel,
 
 fnam = '../trigbox/test-boards/power-test-module/power-test-module.kicad_pcb' if args.filename is None else args.filename
 
+
 class RefRecord(object):
   def __init__(self, module):
     self._s = list()
@@ -51,7 +52,7 @@ class RefCheck(object):
       try:
         o[key]
         if not self._refs.has(o):
-          print("{} ({}) has '{}' but no ref found".format('.'.join(path), o, key))
+          print("{} ({}) has '{}' but no ref found".format('.'.join(path), o, key), file=sys.sterr)
           self._errs = self._errs + 1
       except KeyError:
         pass
@@ -110,7 +111,7 @@ class PCBPart(object):
     # check for error
     haveErrs = False
     for e in pcb.getError():
-      print('Error: {}'.format(e))
+      print('Error: {}'.format(e), file=sys.stderr)
       haveErrs = True
     if haveErrs:
       raise RuntimeError("Parsing Errors Encoutered")
@@ -243,12 +244,72 @@ class PCBPart(object):
     self.visitVias(fixMap)
     RefCheck(refs)
 
-  def add(self, mergee, mergeNets=[]):
+  def fixupPaths(self, anchor):
+    for m in self.getPcb()['module']:
+      # replace path (action=0)
+      m._value.add(Sexp('path','/' + anchor + m['path']), action=0)
+
+  @staticmethod
+  def netClassEqual(nc1, nc2):
+    if len(nc1) != len(nc2):
+      return 0
+    it = iter(nc2)
+    next(it) # dont compare netclass name; caller decides whether that matter
+    next(it) # ignore description
+    r  = 1
+    while True:
+      try:
+        k = next(it)
+        print("comparing {} -- {}".format(nc1[k], nc2[k]), file=sys.stderr)
+        if ( 'add_net' != k and nc1[k] != nc2[k] ):
+          print("netclass ('{}') mismatch: values for '{}' differ".format(nc1[0], k), file=sys.stderr)
+          r = 0
+      except KeyError:
+          print("netclass ('{}') key mismatch: '{}' not found".format(nc1[0], k), file=sys.stderr)
+          r = 0
+      except StopIteration:
+          return r
+
+  @staticmethod
+  def findNetClass(netName, netClasses):
+    for cls in netClasses:
+      for net in cls['add_net']:
+        if net._value == netName:
+          return cls
+    return None
+
+  def hasNetClass(self, name):
+    for ncl in self.getPcb()['net_class']:
+      if ncl[0] == name:
+        return ncl
+    return None
+
+  def checkNetClasses(self, mergee, mergeNets):
+    for mnc in mergee.getPcb()['net_class']:
+      for bnc in self.getPcb()['net_class']:
+        if mnc[0] == bnc[0] and not self.netClassEqual(mnc, bnc):
+          raise RuntimeError("Duplicate net-class with conflicting settings found: '{}'".format(bnc[0]))
+    e = False
+    for net in mergeNets:
+      # current netclass
+      mnc = self.findNetClass(net, mergee.getPcb()['net_class'])
+      bnc = self.findNetClass(net,   self.getPcb()['net_class'])
+      if ( bnc is None and mnc is None ):
+        if net == '""':
+          continue
+        raise RuntimeError("net '{}' not in any netclass??".format(netName));
+      if not self.netClassEqual(mnc, bnc):
+        print("Cannot merge net '{}' -- member of incompatible netclasses".format(net), file=sys.stderr)
+        e = True
+    if e:
+      raise RuntimeError("Incompatible Netclasses")
+
+  def add(self, mergee, anchor, mergeNets=[]):
     # check that there are no overlapping net-names
     err = False
     for netNam in mergee.getNetNames():
       if netNam in self.getNetNames() and not netNam in mergeNets:
-        print("Net '{}' already preset".format( netNam ))
+        print("Net '{}' already preset".format( netNam ), file=sys.stderr)
         err = True
     if err:
       raise RuntimeError("Duplicate net-names found; aborting")
@@ -260,20 +321,54 @@ class PCBPart(object):
         try:
           netNo = self.getNetNames()[el._value[1]]._value[0]
         except KeyError:
-          raise RuntimeError("Net '{}' to be merged not found in base module".format(el._value[1]))
+          raise RuntimeError("Net '{}' to be merged not found in base module".format(el._value[1]), file=sys.stderr)
       else:
-        netNo = el._value[0] + offset
+        netNo  = offset
+        offset = offset + 1
       netMap[el._value[0]] = netNo
+    self.checkNetClasses( mergee, mergeNets )
     mergee.fixupNets( netMap )
-    for cl in ['zone', 'net', 'segment', 'via', 'module']:
+    mergee.fixupPaths( anchor )
+    # merge elements
+    for cl in ['zone', 'net', 'segment', 'via', 'module', 'gr_line', 'gr_poly', 'gr_arc', 'gr_circle', 'gr_text']:
       for el in mergee.getPcb()[cl]:
-        self.getPcb()[cl] = el
+        if cl != 'net' or not el._value[1] in mergeNets:
+          self.getPcb()[cl] = el
+    # merge net classes
+    for ncl in mergee.getPcb()['net_class']:
+      # if this class contains a merged net then we eliminate
+      # it here since it is already a member of the base PCB's 
+      # respective netclass
+      for n in mergeNets:
+        idx = 0
+        for el in ncl['add_net']:
+          if el._value == n:
+            print("Eliminating {} from {}".format(n, ncl[0]), file=sys.stderr)
+            del(ncl['add_net'][idx])
+            # restart with next element of 'mergeNets'
+            # don't rely on iterators here asl ncl['add_net']
+            # has changed
+            break
+          idx = idx + 1
+      # if a netclass with this name is not present then just
+      # add this netclass
+      bnc = self.hasNetClass( ncl[0] )
+      if bnc is None:
+        print("Adding net class '{}' to base PCB".format(ncl[0]), file=sys.stderr)
+        self.getPcb()['net_class'] = ncl
+      else:
+        # merge nets into base PCB's netclass (we checked already
+        # that it's properties are compatible
+        for el in ncl['add_net']:
+          print("Merging net '{}' into base PCB netclass '{}'".format(el._value, ncl[0]), file=sys.stderr)
+          bnc['add_net'] = el
 
-b = PCBPart('a.kicad_pcb')
+b = PCBPart('bas.kicad_pcb.orig')
 RefVerify(b)
-m = PCBPart('l')
+m = PCBPart('mod.kicad_pcb')
 RefVerify(m)
-b.add(m,['""','+3V3','+5V','UART_RX_MIO14','UART_TX_MIO15'])
+#b.add(m,['""','+3V3','+5V','UART_RX_MIO14','UART_TX_MIO15'])
+b.add(m,'60D42C34',['""','+5V'])
 
 class A(object):
   def __init__(self):
