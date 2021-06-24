@@ -3,20 +3,56 @@
 from kicad_pcb import *
 from sexp_parser import *
 import sys
-import argparse
+import getopt
+import re
+import io
 
-parser = argparse.ArgumentParser()
-parser.add_argument("filename",nargs='?')
-parser.add_argument("-l", "--log", dest="logLevel", 
-    choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], 
-    help="Set the logging level")
-parser.add_argument("-o", "--output", help="output filename")
-args = parser.parse_args()    
-logging.basicConfig(level=args.logLevel,
+outf   = None
+mergef = None
+basf   = None
+mergen = []
+anchor = []
+logLvl = 'ERROR'
+opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:")
+for o, a in opts:
+  if o == '-h':
+    print("merge two PCBs", file=sys.stderr)
+  elif o == '-o':
+    if not outf is None:
+      raise RuntimeError("only one -o option permitted")
+    outf = a
+  elif o == '-b':
+    if not basf is None:
+      raise RuntimeError("only one -b option permitted")
+    basf = a
+  elif o == '-m':
+    if not mergef is None:
+      raise RuntimeError("only one -m option permitted")
+    mergef = a
+  elif o == '-l':
+    lchoices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+    if a in lchoices:
+      logLvl = a
+    else:
+      print("-l value must be one of:", file=sys.stderr)
+      for c in lchoices:
+        print(c, file=sys.stderr)
+      raise RuntimeError("Invalid logging level")
+  elif o == '-n':
+    mergen.append(a)
+  elif o == '-p':
+    anchor = a.split(':')
+    if not len(anchor) in [1,2]:
+      raise RuntimeError("path substitution must be '[from:]to'")
+
+if basf is None:
+  raise RuntimeError("Exactly one -b option (base PCB) required")
+
+if mergef is None:
+  raise RuntimeError("Exactly one -m option (mergee PCB) required")
+
+logging.basicConfig(level=logLvl,
         format="%(filename)s:%(lineno)s: %(levelname)s - %(message)s")
-
-fnam = '../trigbox/test-boards/power-test-module/power-test-module.kicad_pcb' if args.filename is None else args.filename
-
 
 class RefRecord(object):
   def __init__(self, module):
@@ -245,9 +281,16 @@ class PCBPart(object):
     RefCheck(refs)
 
   def fixupPaths(self, anchor):
+    if 0 == len(anchor):
+      return
+    pats = '^'
+    repl = '/' + anchor[-1]
+    if 1 < len(anchor):
+      pats = '^/' + anchor[0]
+    pat = re.compile(pats)
     for m in self.getPcb()['module']:
       # replace path (action=0)
-      m._value.add(Sexp('path','/' + anchor + m['path']), action=0)
+      m._value.add(Sexp('path',pat.sub( repl, m['path'], 1)), action=0)
 
   @staticmethod
   def netClassEqual(nc1, nc2):
@@ -363,20 +406,15 @@ class PCBPart(object):
           print("Merging net '{}' into base PCB netclass '{}'".format(el._value, ncl[0]), file=sys.stderr)
           bnc['add_net'] = el
 
-b = PCBPart('bas.kicad_pcb.orig')
+b = PCBPart(basf)
 RefVerify(b)
-m = PCBPart('mod.kicad_pcb')
+m = PCBPart(mergef)
 RefVerify(m)
-#b.add(m,['""','+3V3','+5V','UART_RX_MIO14','UART_TX_MIO15'])
-b.add(m,'60D42C34',['""','+5V'])
+b.add(m,anchor,mergen)
 
-class A(object):
-  def __init__(self):
-    pass
-  def __call__(self, nod, pat):
-    print("{}: {}".format(".".join(pat), nod))
-
-#m.visit(A())
-
-
-b.export(sys.stdout,'  ')
+if not outf is None:
+  if '-' == outf:
+    f = sys.stdout
+  else:
+    f = io.open(outf,'w')
+  b.export(f,'  ')
