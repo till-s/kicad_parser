@@ -60,6 +60,7 @@ class KicadPCB(SexpParser):
                 'dimension',
                 'gr_text',
                 'gr_line',
+                'gr_poly',
                 'gr_circle',
                 'gr_arc',
                 'gr_curve',
