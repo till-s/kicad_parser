@@ -94,7 +94,8 @@ class RefCheck(object):
       try:
         o[key]
         if not self._refs.has(o):
-          print("{} ({}) has '{}' but no ref found".format('.'.join(path), o, key), file=sys.sterr)
+          print("key {}, o[key] {}".format(key,o[key]))
+          print("{} ({}) has '{}' but no ref found".format('.'.join(path), o, key), file=sys.stderr)
           self._errs = self._errs + 1
       except KeyError:
         pass

@@ -1,14 +1,17 @@
 '''
 ``kicad_pcb`` parser using `sexp_parser.SexpParser`
 
-The parser `KicadPCB` demostrates the usage of a more gernal S-expression
+The parser `KicadPCB` demonstrates the usage of a more general S-expression
 parser of class `sexp_parser.SexpParser`. Check out the source to see how easy
 it is to implement a parser in an almost declarative way.
 
-A usage demostration is avaiable in `test.py`
+A usage demonstration is available in `test.py`
 '''
 
-from sexp_parser import *
+try:
+    from .sexp_parser import *
+except ImportError:
+    from sexp_parser.sexp_parser import *
 
 __author__ = "Zheng, Lei"
 __copyright__ = "Copyright 2016, Zheng, Lei"
@@ -43,7 +46,7 @@ class KicadPCB_module(SexpParser):
     _default_bools = 'locked'
     _parse_fp_text = KicadPCB_gr_text
     _parse_pad = KicadPCB_pad
-    
+
 
 class KicadPCB(SexpParser):
 
@@ -64,9 +67,11 @@ class KicadPCB(SexpParser):
                 'gr_circle',
                 'gr_arc',
                 'gr_curve',
+                'gr_poly',
                 'segment',
                 'arc',
                 'via',
+                'module',
                 ['module'] + _module,
                 ['footprint'] + _module,
                 ('zone',
@@ -84,7 +89,7 @@ class KicadPCB(SexpParser):
         return getSexpError(self)
 
     @staticmethod
-    def load(filename):
+    def load(filename, quote_no_parse=None):
         with open(filename,'r') as f:
-            return KicadPCB(parseSexp(f.read()))
+            return KicadPCB(parseSexp(f.read(), quote_no_parse))
 

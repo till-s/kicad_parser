@@ -37,6 +37,7 @@ each sheet must be annotated individually
  - select 'Use the current page only'
  - select 'Reset existing annotations'
  - select 'Use first free number after: X'
+ - *unselect* `re-link footprints to schematic symbols based on their reference designators`
 Repeat this process for every sheet, choosing 'X' so that
 the numbers don't overlap between sheets nor the main project.
 
