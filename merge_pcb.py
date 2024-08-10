@@ -7,59 +7,6 @@ import getopt
 import re
 import io
 
-outf   = None
-mergef = None
-basf   = None
-mergen = []
-anchor = []
-test   = False
-logLvl = 'ERROR'
-shtPre = None
-opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:ts:")
-for o, a in opts:
-  if o == '-t':
-    test = True
-  if o == '-h':
-    print("merge two PCBs", file=sys.stderr)
-  elif o == '-o':
-    if not outf is None:
-      raise RuntimeError("only one -o option permitted")
-    outf = a
-  elif o == '-b':
-    if not basf is None:
-      raise RuntimeError("only one -b option permitted")
-    basf = a
-  elif o == '-m':
-    if not mergef is None:
-      raise RuntimeError("only one -m option permitted")
-    mergef = a
-  elif o == '-l':
-    lchoices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-    if a in lchoices:
-      logLvl = a
-    else:
-      print("-l value must be one of:", file=sys.stderr)
-      for c in lchoices:
-        print(c, file=sys.stderr)
-      raise RuntimeError("Invalid logging level")
-  elif o == '-n':
-    mergen.append(a)
-  elif o == '-p':
-    anchor = a.split(':')
-    if not len(anchor) in [1,2]:
-      raise RuntimeError("path substitution must be '[from:]to'")
-  elif o == '-s':
-    shtPre = a
-
-if basf is None:
-  raise RuntimeError("Exactly one -b option (base PCB) required")
-
-if mergef is None and not test:
-  raise RuntimeError("Exactly one -m option (mergee PCB) required")
-
-logging.basicConfig(level=logLvl,
-        format="%(filename)s:%(lineno)s: %(levelname)s - %(message)s")
-
 class RefRecord(object):
   def __init__(self, module):
     self._s = list()
@@ -478,16 +425,81 @@ class PCBPart(object):
           print("Merging net '{}' into base PCB netclass '{}'".format(el._value, ncl[0]), file=sys.stderr)
           bnc['add_net'] = el
 
-b = PCBPart(basf)
-RefVerify(b)
-if not mergef is None:
-  m = PCBPart(mergef)
-  RefVerify(m)
-  b.add(m,anchor,mergen,shtPre)
+if (__name__ == "__main__"):
+  outf   = None
+  mergef = None
+  basf   = None
+  mergen = []
+  anchor = []
+  test   = False
+  logLvl = 'ERROR'
+  shtPre = None
+  opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:ts:")
+  for o, a in opts:
+    if o == '-t':
+      test = True
+    if o == '-h':
+      print("merge two PCBs")
+      print("  -h                  : This message")
+      print("  -b <top-project-pcb>: Main PCB filename")
+      print("  -m <sub-project-pcb>: PCB to be merged into main PCB")
+      print("  -p <prefix-hash>    : hash of mergee subproject")
+      print("  -o <output-pcb>     : Filename of output PCB")
+      print("  -n <net name>       : name of net with the same name in main- and sub- projects")
+      print("                        that can be safely connected. May be used multiple times")
+      print("  -l <log level>      : one of ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']")
+      print("  -s <prefix>         : prefix local labels in mergee project with <prefix>")
+      print("  -t                  : test mode")
+      sys.exit(0)
+    elif o == '-o':
+      if not outf is None:
+        raise RuntimeError("only one -o option permitted")
+      outf = a
+    elif o == '-b':
+      if not basf is None:
+        raise RuntimeError("only one -b option permitted")
+      basf = a
+    elif o == '-m':
+      if not mergef is None:
+        raise RuntimeError("only one -m option permitted")
+      mergef = a
+    elif o == '-l':
+      lchoices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+      if a in lchoices:
+        logLvl = a
+      else:
+        print("-l value must be one of:", file=sys.stderr)
+        for c in lchoices:
+          print(c, file=sys.stderr)
+        raise RuntimeError("Invalid logging level")
+    elif o == '-n':
+      mergen.append(a)
+    elif o == '-p':
+      anchor = a.split(':')
+      if not len(anchor) in [1,2]:
+        raise RuntimeError("path substitution must be '[from:]to'")
+    elif o == '-s':
+      shtPre = a
 
-if not outf is None:
-  if '-' == outf:
-    f = sys.stdout
-  else:
-    f = io.open(outf,'w')
-  b.export(f,'  ')
+  if basf is None:
+    raise RuntimeError("Exactly one -b option (base PCB) required")
+
+  if mergef is None and not test:
+    raise RuntimeError("Exactly one -m option (mergee PCB) required")
+
+  logging.basicConfig(level=logLvl,
+          format="%(filename)s:%(lineno)s: %(levelname)s - %(message)s")
+
+  b = PCBPart(basf)
+  RefVerify(b)
+  if not mergef is None:
+    m = PCBPart(mergef)
+    RefVerify(m)
+    b.add(m,anchor,mergen,shtPre)
+
+  if not outf is None:
+    if '-' == outf:
+      f = sys.stdout
+    else:
+      f = io.open(outf,'w')
+    b.export(f,'  ')
