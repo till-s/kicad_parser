@@ -360,7 +360,9 @@ class PCBPart(object):
       if ( bnc is None and mnc is None ):
         if net == '""':
           continue
-        raise RuntimeError("net '{}' not in any netclass??".format(netName));
+        #raise RuntimeError("net '{}' not in any netclass??".format(net))
+        print("Warning: net '{}' not in any netclass??".format(net))
+        continue
       if not self.netClassEqual(mnc, bnc):
         print("Cannot merge net '{}' -- member of incompatible netclasses".format(net), file=sys.stderr)
         e = True
