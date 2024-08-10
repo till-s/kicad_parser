@@ -474,9 +474,9 @@ if not mergef is None:
   RefVerify(m)
   b.add(m,anchor,mergen,shtPre)
 
-  if not outf is None:
-    if '-' == outf:
-      f = sys.stdout
-    else:
-      f = io.open(outf,'w')
-    b.export(f,'  ')
+if not outf is None:
+  if '-' == outf:
+    f = sys.stdout
+  else:
+    f = io.open(outf,'w')
+  b.export(f,'  ')
