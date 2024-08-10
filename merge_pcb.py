@@ -310,7 +310,7 @@ class PCBPart(object):
     pat = re.compile(pats)
     for m in self.getPcb()['footprint']:
       # replace path (action=0)
-      m._value.add(Sexp('path',pat.sub( repl, m['path'], 1)), action=0)
+      m._value.add(Sexp('path','"' + pat.sub( repl, m['path'].strip('"'), 1) + '"'), action=0)
 
   @staticmethod
   def netClassEqual(nc1, nc2):
