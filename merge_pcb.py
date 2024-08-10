@@ -228,7 +228,7 @@ class PCBPart(object):
         action(v)
 
   def visitPads(self, action=None):
-    for m in self._pcb['module']:
+    for m in self._pcb['footprint']:
       for p in m['pad']:
         try:
           n = p['net']
@@ -308,7 +308,7 @@ class PCBPart(object):
     if 1 < len(anchor):
       pats = '^/' + anchor[0]
     pat = re.compile(pats)
-    for m in self.getPcb()['module']:
+    for m in self.getPcb()['footprint']:
       # replace path (action=0)
       m._value.add(Sexp('path',pat.sub( repl, m['path'], 1)), action=0)
 
@@ -398,7 +398,7 @@ class PCBPart(object):
       if z['net_name'][0] == '/':
         z._value.add(Sexp('net_name', self.prefixedName(pre, z['net_name'])), action = 0)
     # rename nets in pads
-    for m in self.getPcb()['module']:
+    for m in self.getPcb()['footprint']:
       for p in m['pad']:
         try:
           n = p['net']
@@ -443,7 +443,7 @@ class PCBPart(object):
     mergee.fixupNets( netMap )
     mergee.fixupPaths( anchor )
     # merge elements
-    for cl in ['zone', 'net', 'arc', 'segment', 'via', 'module', 'gr_line', 'gr_poly', 'gr_arc', 'gr_circle', 'gr_text']:
+    for cl in ['zone', 'net', 'arc', 'segment', 'via', 'footprint', 'gr_line', 'gr_poly', 'gr_arc', 'gr_circle', 'gr_text']:
       for el in mergee.getPcb()[cl]:
         if cl != 'net' or not el._value[1] in mergeNets:
           self.getPcb()[cl] = el
