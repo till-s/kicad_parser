@@ -438,7 +438,7 @@ if (__name__ == "__main__"):
   for o, a in opts:
     if o == '-t':
       test = True
-    if o == '-h':
+    elif o == '-h':
       print("merge two PCBs")
       print("  -h                  : This message")
       print("  -b <top-project-pcb>: Main PCB filename")
