@@ -26,10 +26,11 @@ import regex as re
 #  - name
 #  - 'path'
 class Map:
-  def __init__(self, name, path):
-    self._name_ = name
+  def __init__(self, prjname, path, filename):
+    self._name_ = prjname
     self._path_ = path
     self._patt_ = re.compile('^' + path)
+    self._fnam_ = filename
 
   @property
   def _name(self):
@@ -42,6 +43,11 @@ class Map:
   @property
   def _patt(self):
     return self._patt_
+
+  @property
+  def _fileName(self):
+    return self._fnam_
+
 
 class KicadSch(SexpParser):
 
@@ -188,21 +194,32 @@ class KicadSch(SexpParser):
   #   - when main-project is the top
   # note the subproject must be a direct subsheet of the
   # main-project top sheet
-  def mkMaps(self, main_name, sub_name):
+  def mkMaps(self, main_name, sub_sheet_name):
     sheetList = self.mkList( self['sheet'] )
     for sheet in sheetList:
+      sheet_name = None
+      file_name = None
       for p in sheet['property']:
-        if p[0].strip('"') == 'Sheetfile':
-          fnam = p[1].strip('"')
-          if ( fnam == sub_name + '.kicad_sch' ):
-            prjs = self.mkList( sheet['instances']['project'] )
-            for prj in prjs:
-              if ( prj[0].strip('"') == main_name ):
-                path = prj['path'][0].strip('"')
-                dst = Map( main_name, path + '/' + sheet['uuid'] )
-                src = Map( sub_name, '/' + KicadSch.load(fnam)['uuid'] )
-                return src, dst
-    raise RuntimeError("unable to determine subproject paths")
+        if p[0].strip('"') == 'Sheetname':
+          sheet_name = p[1].strip('"')
+        elif p[0].strip('"') == 'Sheetfile':
+          file_name = p[1].strip('"')
+      if ( sub_sheet_name == sheet_name ):
+        if ( file_name is None ):
+          raise RuntimeError("mkMaps: sheet with name '{}' has no 'Sheetfile' property".format(sub_sheet_name))
+        sub_name = re.sub("[.].*", "", file_name)
+        prjs = self.mkList( sheet['instances']['project'] )
+        for prj in prjs:
+          if ( prj[0].strip('"') == main_name ):
+            path = prj['path'][0].strip('"')
+            dst = Map( main_name, path + '/' + sheet['uuid'], KicadSch.mkSchFileName( main_name ) )
+            src = Map( sub_name, '/' + KicadSch.load(file_name)['uuid'], file_name )
+            return src, dst
+        break
+    if ( sheet_name is None ):
+      raise RuntimeError("mkMaps: sheet with name '{}' not found".format(sub_sheet_name))
+    else:
+      raise RuntimeError("mkMaps: sheet with name '{}' has not project '{}'".format(sub_sheet_name, main_name))
 
   def export(self, out, indent='  '):
     exportSexp(self, out, '', indent)
@@ -229,10 +246,14 @@ class KicadSch(SexpParser):
     sheetList.extend( KicadSch.load(fn)._getSheets() )
     return sheetList
 
+  @staticmethod
+  def mkSchFileName(prj_name):
+    return prj_name + '.kicad_sch'
+
   # Obtain the subproject prefix that can be used by 'merge_pcb'  (-p option)
   @staticmethod
-  def getMergePcbPrefix(main_name, sub_name):
-    src,dst = KicadSch.load(main_name + '.kicad_sch').mkMaps(main_name, sub_name)
+  def getMergePcbPrefix(main_name, sub_sheet_name):
+    src,dst = KicadSch.load(KicadSch.mkSchFileName(main_name)).mkMaps(main_name, sub_sheet_name)
     return dst._path.split('/')[-1]
 
   # Reannotate a 'main' project using references from a 'sub' project.
@@ -242,9 +263,9 @@ class KicadSch(SexpParser):
   #          main-project's top sheet (and not a sub-sheet; this is not
   #          supported ATM).
   @staticmethod
-  def reannotate(main_name, sub_name):
-    src,dst = KicadSch.load(main_name + '.kicad_sch').mkMaps(main_name, sub_name)
-    files = KicadSch.getSheets(sub_name + '.kicad_sch')
+  def reannotate(main_name, sub_sheet_name):
+    src,dst = KicadSch.load(KicadSch.mkSchFileName(main_name)).mkMaps(main_name, sub_sheet_name)
+    files = KicadSch.getSheets(src._fileName)
     for f in files:
       sch = KicadSch.load(f)
       try:
