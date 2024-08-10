@@ -110,6 +110,7 @@ class RefVerify(RefRecord):
     module.visitSegments(self)
     module.visitPads(self)
     module.visitVias(self)
+    module.visitArcs(self)
     module.visit(RefCheck(self))
 
   def __call__(self, o):
@@ -219,6 +220,13 @@ class PCBPart(object):
       else:
         action(v)
 
+  def visitArcs(self, action=None):
+    for v in self._pcb['arc']:
+      if action is None:
+        print("arc [{:d}]".format(v['net']))
+      else:
+        action(v)
+
   def visitPads(self, action=None):
     for m in self._pcb['module']:
       for p in m['pad']:
@@ -289,6 +297,7 @@ class PCBPart(object):
     self.visitSegments(fixMap)
     self.visitPads(FixupPad(refs))
     self.visitVias(fixMap)
+    self.visitArcs(fixMap)
     RefCheck(refs)
 
   def fixupPaths(self, anchor):
@@ -434,7 +443,7 @@ class PCBPart(object):
     mergee.fixupNets( netMap )
     mergee.fixupPaths( anchor )
     # merge elements
-    for cl in ['zone', 'net', 'segment', 'via', 'module', 'gr_line', 'gr_poly', 'gr_arc', 'gr_circle', 'gr_text']:
+    for cl in ['zone', 'net', 'arc', 'segment', 'via', 'module', 'gr_line', 'gr_poly', 'gr_arc', 'gr_circle', 'gr_text']:
       for el in mergee.getPcb()[cl]:
         if cl != 'net' or not el._value[1] in mergeNets:
           self.getPcb()[cl] = el
