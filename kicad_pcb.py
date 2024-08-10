@@ -77,7 +77,7 @@ class KicadPCB(SexpParser):
                 ('zone',
                     'filled_polygon'))
 
-    _alias_keys = {'footprint' : 'module'}
+#    _alias_keys = {'footprint' : 'module'}
     _parse_module = KicadPCB_module
     _parse_footprint = KicadPCB_module
     _parse_gr_text = KicadPCB_gr_text
