@@ -207,3 +207,8 @@ into the main PCB (after saving the original):
      - *select* `re-link footprints to schematic symbols based on their reference designators`
 
    for this to work.
+
+## Limitations
+
+Currently, merging sub-hierarchies is not supported, i.e., the mergee
+design must reside in a single schematics sheet.

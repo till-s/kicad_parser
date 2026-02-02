@@ -1,5 +1,5 @@
 from sexp_parser import *
-import regex as re
+import re
 
 # Support reannotating a main-project that uses a sub-project so that
 # references in the main-project exactly match their counter-parts
@@ -28,8 +28,8 @@ import regex as re
 class Map:
   def __init__(self, prjname, path, filename):
     self._name_ = prjname
-    self._path_ = path
-    self._patt_ = re.compile('^' + path)
+    self._path_ = path.replace('"','')
+    self._patt_ = re.compile('^' + self._path)
     self._fnam_ = filename
 
   @property
@@ -101,6 +101,26 @@ class KicadSch(SexpParser):
       x = SexpList(x)
     return x
 
+  @staticmethod
+  def matchNameOrUUID(prj, aname, auuid):
+    # print('matchNameOrUUID {} {}'.format(aname,auuid))
+    name=prj[0].strip('"')
+    if ( len(name) > 0 ):
+       # print('checking against name'.format(name))
+       return name == aname
+    auuid=auuid.strip('"')
+    for p in KicadSch.mkList(prj['path']):
+      uuid = p[0].split('/')[1].strip('"')
+      # print('checking against uuid {}'.format(uuid))
+      if ( auuid == uuid ):
+        return True
+    return False
+
+  @staticmethod
+  def matchMap(prj,amap):
+    auuid = amap._path.split('/')[1]
+    return KicadSch.matchNameOrUUID(prj, amap._name, auuid)
+
   # copy references as used in one project ('src') to another project ('dst')
   # Note that a symbol may be instantiated by many projects and on multiple
   # subsheets. Every instance is identified by a unique 'path' which describes
@@ -153,10 +173,10 @@ class KicadSch(SexpParser):
       # exist - their paths will still be present in 'instances' and we will
       # filter them below...
       for prj in prjlst:
-        if ( prj[0].strip('"') == src._name ):
+        if self.matchMap(prj, src):
           # 'from' project name found; record this project
           srcprj = prj
-        elif ( prj[0].strip('"') == dst._name ):
+        elif ( self.matchMap(prj, dst) ):
           # 'dst' project name found; record this project
           dstprj = prj
         if not srcprj is None and not dstprj is None:
@@ -167,6 +187,8 @@ class KicadSch(SexpParser):
           for elsrc in srcpath:
             # filter paths that match the 'from' pattern
             replacement = src._patt.subn( dst._path, elsrc[0].strip('"') )
+            # Debugging
+            # print("replacement {}".format(replacement))
             if ( replacement[1] == 1 ):
               # successful replacement, i.e., the from path matches 'el'
               # now find the matching 'dst' path which is associated with
@@ -185,41 +207,60 @@ class KicadSch(SexpParser):
                   break
           break
       if (srcprj is None):
-         raise RuntimeError("project {} not found".format(src))
+         raise RuntimeError("src project {} not found in {}".format(src._path, src._fileName))
       if (dstprj is None):
-         raise RuntimeError("project {} not found".format(dst))
+         raise RuntimeError("dst project {} not found".format(dst._path))
 
-  # determine paths of subproject
-  #   - when subproject is the top
-  #   - when main-project is the top
-  # note the subproject must be a direct subsheet of the
-  # main-project top sheet
-  def mkMaps(self, main_name, sub_sheet_name):
-    sheetList = self.mkList( self['sheet'] )
+  # recursively look for sub_sheet_name in 'file_name' and it's subsheets
+  # while recording the UUIDs that lead there
+  @staticmethod
+  def getSubsheetUUIDPath(uuid_list, file_name, sub_sheet_name):
+    instantiator = None
+    asch         = KicadSch.load(file_name)
+    try:
+      sheetList    = KicadSch.mkList( asch['sheet'] )
+    except KeyError:
+      return None
     for sheet in sheetList:
       sheet_name = None
-      file_name = None
+      sheet_file = None
       for p in sheet['property']:
         if p[0].strip('"') == 'Sheetname':
           sheet_name = p[1].strip('"')
         elif p[0].strip('"') == 'Sheetfile':
-          file_name = p[1].strip('"')
+          sheet_file = p[1].strip('"')
+      if ( sheet_file is None ):
+        msg = "getSubsheetUUIDPath: sheet in file {} has no associated file".format(file_name)
+        raise RuntimeError(msg)
+      if ( sheet_name is None ):
+        msg = "getSubsheetUUIDPath: sheet in file {} has no name".format(file_name)
+      uuid_list.append( sheet['uuid'].strip('"') )
       if ( sub_sheet_name == sheet_name ):
-        if ( file_name is None ):
-          raise RuntimeError("mkMaps: sheet with name '{}' has no 'Sheetfile' property".format(sub_sheet_name))
-        sub_name = re.sub("[.].*", "", file_name)
-        prjs = self.mkList( sheet['instances']['project'] )
-        for prj in prjs:
-          if ( prj[0].strip('"') == main_name ):
-            path = prj['path'][0].strip('"')
-            dst = Map( main_name, path + '/' + sheet['uuid'], KicadSch.mkSchFileName( main_name ) )
-            src = Map( sub_name, '/' + KicadSch.load(file_name)['uuid'], file_name )
-            return src, dst
-        break
-    if ( sheet_name is None ):
-      raise RuntimeError("mkMaps: sheet with name '{}' not found".format(sub_sheet_name))
-    else:
-      raise RuntimeError("mkMaps: sheet with name '{}' has not project '{}'".format(sub_sheet_name, main_name))
+        return sheet_file
+      else:
+        subsheet_file = KicadSch.getSubsheetUUIDPath(uuid_list, sheet_file, sub_sheet_name)
+        if ( not subsheet_file is None ):
+          # found
+          return subsheet_file
+      # nothing found; pop this UUD
+      del( uuid_list[-1] )
+    return None
+  
+
+  # determine paths of subproject
+  #   - when subproject is the top
+  #   - when main-project is the top
+  def mkMaps(self, main_name, sub_sheet_name):
+    uuid_path  = [ self['uuid'] ]
+    main_file  = KicadSch.mkSchFileName( main_name )
+    sheet_file = KicadSch.getSubsheetUUIDPath( uuid_path, main_file, sub_sheet_name )
+    if ( sheet_file is None ):
+      msg = "Unable to locate sheet '{}'".format(sub_sheet_name)
+      raise RuntimeError(msg)
+    sub_name = re.sub("[.].*", "", sheet_file)
+    src = Map( sub_name, '/' + KicadSch.load(sheet_file)['uuid'].strip('"'), sheet_file )
+    dst = Map( main_name, '/' + '/'.join( uuid_path ), main_file )
+    return src, dst
 
   def export(self, out, indent='  '):
     exportSexp(self, out, '', indent)
@@ -260,7 +301,7 @@ class KicadSch(SexpParser):
   #       1. sub-project has unique annotations (e.g., with numbers starting
   #          at 1000).
   #       2. sub-project's top sheet is instantiated as sub-sheet in
-  #          main-project's top sheet (and not a sub-sheet; this is not
+  #          main-project. sub-project cannot be a hierarchy; this is not
   #          supported ATM).
   @staticmethod
   def reannotate(main_name, sub_sheet_name):
