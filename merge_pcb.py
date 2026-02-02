@@ -41,7 +41,7 @@ class RefCheck(object):
       try:
         o[key]
         if not self._refs.has(o):
-          print("key {}, o[key] {}".format(key,o[key]))
+          print("key {}, o[key] {}, uuid {}".format(key,o[key],o['uuid']))
           print("{} ({}) has '{}' but no ref found".format('.'.join(path), o, key), file=sys.stderr)
           self._errs = self._errs + 1
       except KeyError:
@@ -323,18 +323,27 @@ class PCBPart(object):
         dup.append(netNam)
     return dup
 
+  LCL = re.compile('^["]{0,1}[/]')
+
+  @staticmethod
+  def isLocalNet(nam):
+    return not PCBPart.LCL.match(nam) is None
+
   @staticmethod
   def prefixedName(pre, nam):
-    if nam[0] != '/':
+    if not PCBPart.isLocalNet(nam):
       raise RuntimeError("name to be prefixed does not start with a '/'")
     if pre is None or len(pre) == 0 or pre == '/':
       raise RuntimeError("found a local label ({}) but no prefix -- you must give a prefix with '-s' ".format(nam))
-    return pre + nam
+    newnam = pre + nam.strip('"')
+    if nam[0] == '"':
+      return '"' + newnam + '"'
+    return newnam
 
   def renameLocalLabelNets(self, pre):
     # rename nets
     for n in self.getPcb()['net']:
-      if n[1][0] == '/':
+      if PCBPart.isLocalNet(n[1]):
         try:
           n._value[1] = self.prefixedName(pre, n[1])
         except AttributeError:
@@ -344,7 +353,7 @@ class PCBPart(object):
     self.buildNetlist()
     # rename nets in zones
     for z in self.getPcb()['zone']:
-      if z['net_name'][0] == '/':
+      if PCBPart.isLocalNet(z['net_name']):
         z._value.add(Sexp('net_name', self.prefixedName(pre, z['net_name'])), action = 0)
     # rename nets in pads
     for m in self.getPcb()['footprint']:
@@ -354,12 +363,12 @@ class PCBPart(object):
         except KeyError:
           # pad is not connected
           continue
-        if n[1][0] == '/':
+        if PCBPart.isLocalNet(n[1]):
           n[1] = self.prefixedName(pre, n[1])
     # rename nets in netclass
     for ncl in self.getPcb()['net_class']:
       for n in ncl['add_net']:
-        if n._value[0] == '/':
+        if PCBPart.isLocalnet(n._value):
           n._value = self.prefixedName(pre, n._value)
 
   def add(self, mergee, anchor, mergeNets=[], localLblPrefix=None):
@@ -429,12 +438,13 @@ if (__name__ == "__main__"):
   outf   = None
   mergef = None
   basf   = None
+  verf   = None
   mergen = []
   anchor = []
   test   = False
   logLvl = 'ERROR'
   shtPre = None
-  opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:ts:")
+  opts, args = getopt.getopt(sys.argv[1:], "hm:l:o:n:p:b:ts:v:")
   for o, a in opts:
     if o == '-t':
       test = True
@@ -449,6 +459,7 @@ if (__name__ == "__main__"):
       print("                        that can be safely connected. May be used multiple times")
       print("  -l <log level>      : one of ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']")
       print("  -s <prefix>         : prefix local labels in mergee project with <prefix>")
+      print("  -v <pcb>            : verify pcb file")
       print("  -t                  : test mode")
       sys.exit(0)
     elif o == '-o':
@@ -480,6 +491,12 @@ if (__name__ == "__main__"):
         raise RuntimeError("path substitution must be '[from:]to'")
     elif o == '-s':
       shtPre = a
+    elif o == '-v':
+      verf   = a
+
+  if not verf is None:
+    RefVerify(PCBPart(verf))
+    sys.exit(0)
 
   if basf is None:
     raise RuntimeError("Exactly one -b option (base PCB) required")
